@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -18,6 +19,7 @@ from flask import (
     send_from_directory,
     url_for,
 )
+from markupsafe import Markup, escape
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ALLOWED_HOSTS = {"jw.org", "www.jw.org", "wol.jw.org"}
@@ -148,7 +150,47 @@ def get_article(aid):
         return None
     data = doc.to_dict()
     data["id"] = doc.id
+    data["tags"] = data.get("tags") or []
     return data
+
+
+def html_to_text(html):
+    if not html:
+        return ""
+    return BeautifulSoup(html, "lxml").get_text(" ", strip=True)
+
+
+def extract_highlights(html):
+    """Estrae il testo di tutte le sottolineature (<mark class='user-hl'>)."""
+    if not html:
+        return []
+    soup = BeautifulSoup(html, "lxml")
+    out = []
+    for m in soup.select("mark.user-hl"):
+        t = m.get_text(" ", strip=True)
+        t = re.sub(r"\s+", " ", t).strip()
+        if t and (not out or out[-1] != t):
+            out.append(t)
+    return out
+
+
+def make_snippet(text, query, radius=90):
+    """Restituisce un estratto attorno alla parola cercata, con il match evidenziato."""
+    low = text.lower()
+    i = low.find(query.lower())
+    if i == -1:
+        head = text[: radius * 2]
+        return escape(head) + (Markup("…") if len(text) > radius * 2 else Markup(""))
+    start = max(0, i - radius)
+    end = min(len(text), i + len(query) + radius)
+    pre = ("…" if start > 0 else "") + text[start:i]
+    match = text[i : i + len(query)]
+    post = text[i + len(query) : end] + ("…" if end < len(text) else "")
+    return Markup("{}<mark>{}</mark>{}").format(pre, match, post)
+
+
+def category_name_map():
+    return {doc.id: doc.to_dict().get("name", "") for doc in CATEGORIES.stream()}
 
 
 # ----------------------------------------------------------------------------
@@ -176,16 +218,21 @@ def manifest():
 @app.route("/")
 def index():
     counts = {}
-    for doc in ARTICLES.select(["category_id"]).stream():
-        cid = doc.to_dict().get("category_id")
+    tag_counts = {}
+    for doc in ARTICLES.select(["category_id", "tags"]).stream():
+        d = doc.to_dict()
+        cid = d.get("category_id")
         counts[cid] = counts.get(cid, 0) + 1
+        for t in (d.get("tags") or []):
+            tag_counts[t] = tag_counts.get(t, 0) + 1
 
     cats = []
     for doc in CATEGORIES.stream():
         data = doc.to_dict()
         cats.append({"id": doc.id, "name": data.get("name", ""), "n": counts.get(doc.id, 0)})
     cats.sort(key=lambda c: c["name"].lower())
-    return render_template("index.html", categories=cats)
+    tags = sorted(tag_counts.items(), key=lambda x: (-x[1], x[0].lower()))
+    return render_template("index.html", categories=cats, tags=tags)
 
 
 @app.route("/categories", methods=["POST"])
@@ -215,18 +262,23 @@ def view_category(cid):
     if not cat:
         return redirect(url_for("index"))
     articles = []
+    total_hl = 0
     for doc in ARTICLES.where(filter=FieldFilter("category_id", "==", cid)).stream():
         data = doc.to_dict()
+        hl = len(extract_highlights(data.get("content_html", "")))
+        total_hl += hl
         articles.append(
             {
                 "id": doc.id,
                 "title": data.get("title", ""),
                 "url": data.get("url", ""),
                 "created_at": data.get("created_at", ""),
+                "tags": data.get("tags") or [],
+                "hl": hl,
             }
         )
     articles.sort(key=lambda a: a.get("created_at", ""), reverse=True)
-    return render_template("category.html", category=cat, articles=articles)
+    return render_template("category.html", category=cat, articles=articles, total_hl=total_hl)
 
 
 @app.route("/categories/<cid>/articles", methods=["POST"])
@@ -302,6 +354,99 @@ def refresh_article(aid):
         ARTICLES.document(aid).update({"content_html": html})
     except Exception:
         pass
+    return redirect(url_for("view_article", aid=aid))
+
+
+@app.route("/categories/<cid>/study")
+def study_category(cid):
+    cat = get_category(cid)
+    if not cat:
+        return redirect(url_for("index"))
+    print_mode = request.args.get("print") == "1"
+    arts = []
+    for doc in ARTICLES.where(filter=FieldFilter("category_id", "==", cid)).stream():
+        d = doc.to_dict()
+        d["id"] = doc.id
+        arts.append(d)
+    arts.sort(key=lambda a: a.get("created_at", ""))
+    items = []
+    total = 0
+    for a in arts:
+        hl = extract_highlights(a.get("content_html", ""))
+        if hl:
+            items.append(
+                {"id": a["id"], "title": a.get("title", ""), "url": a.get("url", ""), "highlights": hl}
+            )
+            total += len(hl)
+    return render_template(
+        "study.html", category=cat, items=items, total=total, print_mode=print_mode
+    )
+
+
+@app.route("/search")
+def search():
+    q = (request.args.get("q") or "").strip()
+    results = []
+    if q:
+        cat_names = category_name_map()
+        ql = q.lower()
+        for doc in ARTICLES.stream():
+            d = doc.to_dict()
+            title = d.get("title", "")
+            tags = d.get("tags") or []
+            text = html_to_text(d.get("content_html", ""))
+            hay = " ".join([title, " ".join(tags), text]).lower()
+            if ql in hay:
+                in_title = ql in title.lower()
+                source = text if ql in text.lower() else title
+                results.append(
+                    {
+                        "id": doc.id,
+                        "title": title,
+                        "url": d.get("url", ""),
+                        "category_id": d.get("category_id"),
+                        "category_name": cat_names.get(d.get("category_id"), ""),
+                        "tags": tags,
+                        "snippet": make_snippet(source, q),
+                        "in_title": in_title,
+                    }
+                )
+        results.sort(key=lambda r: (not r["in_title"], r["title"].lower()))
+    return render_template("search.html", q=q, results=results, tag=None)
+
+
+@app.route("/tags/<tag>")
+def view_tag(tag):
+    cat_names = category_name_map()
+    results = []
+    for doc in ARTICLES.stream():
+        d = doc.to_dict()
+        if tag in (d.get("tags") or []):
+            results.append(
+                {
+                    "id": doc.id,
+                    "title": d.get("title", ""),
+                    "url": d.get("url", ""),
+                    "category_id": d.get("category_id"),
+                    "category_name": cat_names.get(d.get("category_id"), ""),
+                    "tags": d.get("tags") or [],
+                    "snippet": "",
+                    "in_title": False,
+                }
+            )
+    results.sort(key=lambda r: r["title"].lower())
+    return render_template("search.html", q="", results=results, tag=tag)
+
+
+@app.route("/articles/<aid>/tags", methods=["POST"])
+def save_tags(aid):
+    raw = request.form.get("tags", "")
+    tags = []
+    for t in raw.replace("#", "").split(","):
+        t = t.strip()
+        if t and t not in tags:
+            tags.append(t)
+    ARTICLES.document(aid).update({"tags": tags})
     return redirect(url_for("view_article", aid=aid))
 
 

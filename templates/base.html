@@ -23,6 +23,10 @@
 <header class="topbar">
   <a class="brand" href="{{ url_for('index') }}">Ricerche JW</a>
   {% block topbar_extra %}{% endblock %}
+  <form class="topsearch no-print" method="get" action="{{ url_for('search') }}">
+    <input type="search" name="q" placeholder="Cerca in tutti gli articoli…"
+           value="{{ request.args.get('q','') if request.endpoint == 'search' else '' }}">
+  </form>
 </header>
 <main class="container">
 {% block content %}{% endblock %}

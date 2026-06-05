@@ -45,6 +45,19 @@
       Categoria: <strong>{{ article.category_name }}</strong> ·
       <a href="{{ article.url }}" target="_blank" rel="noopener">Fonte</a>
     </p>
+    {% if article.tags %}
+    <p class="article-tags">
+      {% for t in article.tags %}<a class="tag" href="{{ url_for('view_tag', tag=t) }}">#{{ t }}</a>{% endfor %}
+    </p>
+    {% endif %}
+    {% if not print_mode %}
+    <form class="tags-form no-print" method="post" action="{{ url_for('save_tags', aid=article.id) }}">
+      <label>Tag:</label>
+      <input type="text" name="tags" value="{{ article.tags|join(', ') }}"
+             placeholder="es. speranza, preghiera, matrimonio">
+      <button type="submit" class="ghost">Salva tag</button>
+    </form>
+    {% endif %}
   </header>
   <div id="article-content" class="article-content">
     {{ article.content_html | safe }}

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Foglio di studio · {{ category.name }}{% endblock %}
+{% block body_class %}{% if print_mode %}print-mode{% endif %}{% endblock %}
+{% block topbar_extra %}
+{% if not print_mode %}
+<nav class="crumbs">
+  <a href="{{ url_for('index') }}">Categorie</a> ›
+  <a href="{{ url_for('view_category', cid=category.id) }}">{{ category.name }}</a> ›
+  <span>Foglio di studio</span>
+</nav>
+{% endif %}
+{% endblock %}
+{% block content %}
+
+{% if not print_mode %}
+<div class="article-toolbar no-print">
+  <a class="btn-link" href="{{ url_for('study_category', cid=category.id, print=1) }}" target="_blank">
+    Salva come PDF
+  </a>
+  <a class="btn-link ghost-link" href="{{ url_for('view_category', cid=category.id) }}">
+    ← Torna alla categoria
+  </a>
+</div>
+{% endif %}
+
+<article class="article-wrap">
+  <header class="article-head">
+    <h1>Foglio di studio — {{ category.name }}</h1>
+    <p class="article-meta">
+      {{ total }} sottolineatur{{ 'a' if total == 1 else 'e' }} ·
+      {{ items|length }} articol{{ 'o' if items|length == 1 else 'i' }}
+    </p>
+  </header>
+
+  {% if items %}
+  <div class="study-content">
+    {% for it in items %}
+    <section class="study-article">
+      <h2>{{ it.title }}</h2>
+      <p class="study-source">
+        <a href="{{ it.url }}" target="_blank" rel="noopener">Fonte</a>
+        {% if not print_mode %} · <a href="{{ url_for('view_article', aid=it.id) }}">apri articolo</a>{% endif %}
+      </p>
+      <ul class="study-hl">
+        {% for h in it.highlights %}<li>{{ h }}</li>{% endfor %}
+      </ul>
+    </section>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty">
+    Non hai ancora sottolineato niente in questa categoria. Apri un articolo,
+    seleziona del testo col mouse e premi “Sottolinea selezione”.
+  </p>
+  {% endif %}
+</article>
+
+{% if print_mode %}
+<script>window.addEventListener('load', () => setTimeout(() => window.print(), 300));</script>
+{% endif %}
+{% endblock %}

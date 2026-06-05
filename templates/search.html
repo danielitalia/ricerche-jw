@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}{% if tag %}#{{ tag }}{% elif q %}Ricerca: {{ q }}{% else %}Ricerca{% endif %} · Ricerche JW{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>
+    {% if tag %}Tag: <span class="tag big">#{{ tag }}</span>
+    {% elif q %}Risultati per “{{ q }}”
+    {% else %}Cerca{% endif %}
+  </h1>
+
+  {% if not tag %}
+  <form class="add-form" method="get" action="{{ url_for('search') }}">
+    <input type="search" name="q" value="{{ q }}" placeholder="Cerca una parola, un nome, un versetto…" autofocus>
+    <button type="submit">Cerca</button>
+  </form>
+  {% endif %}
+
+  {% if results %}
+  <p class="muted-note">{{ results|length }} risultat{{ 'o' if results|length == 1 else 'i' }}</p>
+  <ul class="art-list">
+    {% for r in results %}
+    <li class="art-item">
+      <a class="art-link" href="{{ url_for('view_article', aid=r.id) }}">
+        <span class="art-title">{{ r.title }}</span>
+        {% if r.snippet %}<span class="art-snippet">{{ r.snippet }}</span>{% endif %}
+        <span class="art-url">
+          in <strong>{{ r.category_name }}</strong>
+          {% for t in r.tags %}<span class="tag">#{{ t }}</span>{% endfor %}
+        </span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% elif q or tag %}
+  <p class="empty">Nessun risultato.</p>
+  {% endif %}
+</section>
+{% endblock %}

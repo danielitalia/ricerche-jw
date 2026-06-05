@@ -5,7 +5,14 @@
 {% endblock %}
 {% block content %}
 <section class="panel">
-  <h1>{{ category.name }}</h1>
+  <div class="cat-head">
+    <h1>{{ category.name }}</h1>
+    {% if total_hl and total_hl > 0 %}
+    <a class="btn-link study-link" href="{{ url_for('study_category', cid=category.id) }}">
+      📚 Foglio di studio ({{ total_hl }})
+    </a>
+    {% endif %}
+  </div>
 
   <form class="add-form" method="post" action="{{ url_for('add_article', cid=category.id) }}">
     <input type="url" name="url" placeholder="Incolla link da jw.org o wol.jw.org" required>
@@ -30,6 +37,10 @@
     <li class="art-item">
       <a class="art-link" href="{{ url_for('view_article', aid=a.id) }}">
         <span class="art-title">{{ a.title }}</span>
+        <span class="art-meta-row">
+          {% if a.hl and a.hl > 0 %}<span class="hl-badge">✓ {{ a.hl }} sottolineat{{ 'a' if a.hl == 1 else 'e' }}</span>{% endif %}
+          {% for t in a.tags %}<span class="tag">#{{ t }}</span>{% endfor %}
+        </span>
         <span class="art-url">{{ a.url }}</span>
       </a>
       <form method="post" action="{{ url_for('delete_article', aid=a.id) }}"

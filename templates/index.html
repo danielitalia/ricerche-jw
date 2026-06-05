@@ -27,4 +27,15 @@
   <p class="empty">Nessuna categoria. Creane una qui sopra per iniziare.</p>
   {% endif %}
 </section>
+
+{% if tags %}
+<section class="panel tags-panel">
+  <h2>Tag</h2>
+  <div class="tag-cloud">
+    {% for t, n in tags %}
+    <a class="tag" href="{{ url_for('view_tag', tag=t) }}">#{{ t }} <span class="tag-n">{{ n }}</span></a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
 {% endblock %}
