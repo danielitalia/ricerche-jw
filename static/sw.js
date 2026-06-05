@@ -1,5 +1,5 @@
 // Service worker per Ricerche JW (PWA)
-const CACHE = "ricerche-jw-v1";
+const CACHE = "ricerche-jw-v2";
 const APP_SHELL = [
   "/static/style.css",
   "/static/app.js",
