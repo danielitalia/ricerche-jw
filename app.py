@@ -1,61 +1,60 @@
+import json
 import os
-import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+import firebase_admin
 import requests
 from bs4 import BeautifulSoup
-from flask import Flask, g, jsonify, redirect, render_template, request, url_for
+from firebase_admin import credentials, firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
+from flask import Flask, jsonify, redirect, render_template, request, url_for
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# DATA_DIR permette di puntare il database a un disco persistente (es. su Render).
-DATA_DIR = os.environ.get("DATA_DIR", BASE_DIR)
-DB_PATH = os.path.join(DATA_DIR, "ricerche.db")
-
 ALLOWED_HOSTS = {"jw.org", "www.jw.org", "wol.jw.org"}
 
 app = Flask(__name__)
 
 
-def get_db():
-    if "db" not in g:
-        g.db = sqlite3.connect(DB_PATH)
-        g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA foreign_keys = ON")
-    return g.db
+# ----------------------------------------------------------------------------
+# Firebase / Firestore
+# ----------------------------------------------------------------------------
+def init_firebase():
+    if firebase_admin._apps:
+        return
+    cred_json = os.environ.get("FIREBASE_CREDENTIALS")
+    if cred_json:
+        cred = credentials.Certificate(json.loads(cred_json))
+    else:
+        file_candidates = [
+            os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"),
+            "/etc/secrets/serviceAccountKey.json",
+            os.path.join(BASE_DIR, "serviceAccountKey.json"),
+        ]
+        path = next((p for p in file_candidates if p and os.path.exists(p)), None)
+        if not path:
+            raise RuntimeError(
+                "Credenziali Firebase mancanti: imposta la variabile FIREBASE_CREDENTIALS "
+                "oppure metti il file serviceAccountKey.json nella cartella del progetto."
+            )
+        cred = credentials.Certificate(path)
+    firebase_admin.initialize_app(cred)
 
 
-@app.teardown_appcontext
-def close_db(_):
-    db = g.pop("db", None)
-    if db is not None:
-        db.close()
+init_firebase()
+db = firestore.client()
+
+CATEGORIES = db.collection("categories")
+ARTICLES = db.collection("articles")
 
 
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS categories (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            created_at TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS articles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            category_id INTEGER NOT NULL,
-            title TEXT NOT NULL,
-            url TEXT NOT NULL,
-            content_html TEXT,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
-        );
-        """
-    )
-    conn.commit()
-    conn.close()
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
 
 
+# ----------------------------------------------------------------------------
+# Scraping jw.org / wol.jw.org
+# ----------------------------------------------------------------------------
 def host_allowed(url: str) -> bool:
     try:
         host = urlparse(url).netloc.lower()
@@ -122,17 +121,42 @@ def fetch_article(url: str):
     return title or url, str(content)
 
 
+# ----------------------------------------------------------------------------
+# Helper Firestore
+# ----------------------------------------------------------------------------
+def get_category(cid):
+    doc = CATEGORIES.document(cid).get()
+    if not doc.exists:
+        return None
+    data = doc.to_dict()
+    data["id"] = doc.id
+    return data
+
+
+def get_article(aid):
+    doc = ARTICLES.document(aid).get()
+    if not doc.exists:
+        return None
+    data = doc.to_dict()
+    data["id"] = doc.id
+    return data
+
+
+# ----------------------------------------------------------------------------
+# Rotte
+# ----------------------------------------------------------------------------
 @app.route("/")
 def index():
-    db = get_db()
-    cats = db.execute(
-        """
-        SELECT c.id, c.name,
-               (SELECT COUNT(*) FROM articles a WHERE a.category_id = c.id) AS n
-        FROM categories c
-        ORDER BY c.name COLLATE NOCASE
-        """
-    ).fetchall()
+    counts = {}
+    for doc in ARTICLES.select(["category_id"]).stream():
+        cid = doc.to_dict().get("category_id")
+        counts[cid] = counts.get(cid, 0) + 1
+
+    cats = []
+    for doc in CATEGORIES.stream():
+        data = doc.to_dict()
+        cats.append({"id": doc.id, "name": data.get("name", ""), "n": counts.get(doc.id, 0)})
+    cats.sort(key=lambda c: c["name"].lower())
     return render_template("index.html", categories=cats)
 
 
@@ -141,40 +165,43 @@ def create_category():
     name = (request.form.get("name") or "").strip()
     if not name:
         return redirect(url_for("index"))
-    db = get_db()
-    try:
-        db.execute(
-            "INSERT INTO categories (name, created_at) VALUES (?, ?)",
-            (name, datetime.utcnow().isoformat()),
-        )
-        db.commit()
-    except sqlite3.IntegrityError:
-        pass
+    existing = list(
+        CATEGORIES.where(filter=FieldFilter("name", "==", name)).limit(1).stream()
+    )
+    if not existing:
+        CATEGORIES.add({"name": name, "created_at": now_iso()})
     return redirect(url_for("index"))
 
 
-@app.route("/categories/<int:cid>/delete", methods=["POST"])
+@app.route("/categories/<cid>/delete", methods=["POST"])
 def delete_category(cid):
-    db = get_db()
-    db.execute("DELETE FROM categories WHERE id = ?", (cid,))
-    db.commit()
+    for doc in ARTICLES.where(filter=FieldFilter("category_id", "==", cid)).stream():
+        doc.reference.delete()
+    CATEGORIES.document(cid).delete()
     return redirect(url_for("index"))
 
 
-@app.route("/categories/<int:cid>")
+@app.route("/categories/<cid>")
 def view_category(cid):
-    db = get_db()
-    cat = db.execute("SELECT * FROM categories WHERE id = ?", (cid,)).fetchone()
+    cat = get_category(cid)
     if not cat:
         return redirect(url_for("index"))
-    articles = db.execute(
-        "SELECT id, title, url, created_at FROM articles WHERE category_id = ? ORDER BY id DESC",
-        (cid,),
-    ).fetchall()
+    articles = []
+    for doc in ARTICLES.where(filter=FieldFilter("category_id", "==", cid)).stream():
+        data = doc.to_dict()
+        articles.append(
+            {
+                "id": doc.id,
+                "title": data.get("title", ""),
+                "url": data.get("url", ""),
+                "created_at": data.get("created_at", ""),
+            }
+        )
+    articles.sort(key=lambda a: a.get("created_at", ""), reverse=True)
     return render_template("category.html", category=cat, articles=articles)
 
 
-@app.route("/categories/<int:cid>/articles", methods=["POST"])
+@app.route("/categories/<cid>/articles", methods=["POST"])
 def add_article(cid):
     url = (request.form.get("url") or "").strip()
     custom_title = (request.form.get("title") or "").strip()
@@ -186,90 +213,68 @@ def add_article(cid):
         return redirect(url_for("view_category", cid=cid) + f"?err=fetch:{type(e).__name__}")
     if custom_title:
         title = custom_title
-    db = get_db()
-    db.execute(
-        """
-        INSERT INTO articles (category_id, title, url, content_html, created_at)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (cid, title, url, html, datetime.utcnow().isoformat()),
+    ARTICLES.add(
+        {
+            "category_id": cid,
+            "title": title,
+            "url": url,
+            "content_html": html,
+            "created_at": now_iso(),
+        }
     )
-    db.commit()
     return redirect(url_for("view_category", cid=cid))
 
 
-@app.route("/articles/<int:aid>/delete", methods=["POST"])
+@app.route("/articles/<aid>/delete", methods=["POST"])
 def delete_article(aid):
-    db = get_db()
-    art = db.execute("SELECT category_id FROM articles WHERE id = ?", (aid,)).fetchone()
-    db.execute("DELETE FROM articles WHERE id = ?", (aid,))
-    db.commit()
+    art = get_article(aid)
+    ARTICLES.document(aid).delete()
     if art:
         return redirect(url_for("view_category", cid=art["category_id"]))
     return redirect(url_for("index"))
 
 
-@app.route("/articles/<int:aid>")
+@app.route("/articles/<aid>")
 def view_article(aid):
-    db = get_db()
-    art = db.execute(
-        """
-        SELECT a.*, c.name AS category_name
-        FROM articles a JOIN categories c ON c.id = a.category_id
-        WHERE a.id = ?
-        """,
-        (aid,),
-    ).fetchone()
+    art = get_article(aid)
     if not art:
         return redirect(url_for("index"))
+    cat = get_category(art.get("category_id"))
+    art["category_name"] = cat["name"] if cat else ""
     return render_template("article.html", article=art, print_mode=False)
 
 
-@app.route("/articles/<int:aid>/print")
+@app.route("/articles/<aid>/print")
 def print_article(aid):
-    db = get_db()
-    art = db.execute(
-        """
-        SELECT a.*, c.name AS category_name
-        FROM articles a JOIN categories c ON c.id = a.category_id
-        WHERE a.id = ?
-        """,
-        (aid,),
-    ).fetchone()
+    art = get_article(aid)
     if not art:
         return redirect(url_for("index"))
+    cat = get_category(art.get("category_id"))
+    art["category_name"] = cat["name"] if cat else ""
     return render_template("article.html", article=art, print_mode=True)
 
 
-@app.route("/articles/<int:aid>/save", methods=["POST"])
+@app.route("/articles/<aid>/save", methods=["POST"])
 def save_article_html(aid):
     data = request.get_json(silent=True) or {}
     html = data.get("html")
     if html is None:
         return jsonify({"ok": False, "error": "missing html"}), 400
-    db = get_db()
-    db.execute("UPDATE articles SET content_html = ? WHERE id = ?", (html, aid))
-    db.commit()
+    ARTICLES.document(aid).update({"content_html": html})
     return jsonify({"ok": True})
 
 
-@app.route("/articles/<int:aid>/refresh", methods=["POST"])
+@app.route("/articles/<aid>/refresh", methods=["POST"])
 def refresh_article(aid):
-    db = get_db()
-    art = db.execute("SELECT url, category_id FROM articles WHERE id = ?", (aid,)).fetchone()
+    art = get_article(aid)
     if not art:
         return redirect(url_for("index"))
     try:
         _, html = fetch_article(art["url"])
-        db.execute("UPDATE articles SET content_html = ? WHERE id = ?", (html, aid))
-        db.commit()
+        ARTICLES.document(aid).update({"content_html": html})
     except Exception:
         pass
     return redirect(url_for("view_article", aid=aid))
-
-
-# Inizializza il database all'avvio (necessario quando l'app è servita da gunicorn)
-init_db()
 
 
 if __name__ == "__main__":

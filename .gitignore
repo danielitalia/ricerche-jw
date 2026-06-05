@@ -4,3 +4,10 @@ __pycache__/
 .venv/
 venv/
 *.log
+
+# Database locale (i dati ora vivono su Firestore)
+ricerche.db
+
+# Chiave segreta Firebase - NON deve mai finire su GitHub
+serviceAccountKey.json
+*serviceAccount*.json
