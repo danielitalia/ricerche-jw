@@ -1,6 +1,5 @@
 __pycache__/
 *.pyc
-ricerche.db
 .DS_Store
 .venv/
 venv/
