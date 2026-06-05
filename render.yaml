@@ -10,3 +10,5 @@ services:
         value: "3.12.6"
       - key: FLASK_DEBUG
         value: "0"
+      - key: FIREBASE_CREDENTIALS
+        sync: false
