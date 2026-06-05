@@ -14,7 +14,7 @@
     <li class="cat-item">
       <a class="cat-link" href="{{ url_for('view_category', cid=c.id) }}">
         <span class="cat-name">{{ c.name }}</span>
-        <span class="cat-count">{{ c.n }} articolo{{ '' if c.n == 1 else 'i' }}</span>
+        <span class="cat-count">{{ c.n }} articol{{ 'o' if c.n == 1 else 'i' }}</span>
       </a>
       <form method="post" action="{{ url_for('delete_category', cid=c.id) }}"
             onsubmit="return confirm('Eliminare la categoria “{{ c.name }}” e tutti i suoi articoli?');">
