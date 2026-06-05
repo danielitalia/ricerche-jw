@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ category.name }} · Ricerche JW{% endblock %}
+{% block topbar_extra %}
+<nav class="crumbs"><a href="{{ url_for('index') }}">Categorie</a> › <span>{{ category.name }}</span></nav>
+{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>{{ category.name }}</h1>
+
+  <form class="add-form" method="post" action="{{ url_for('add_article', cid=category.id) }}">
+    <input type="url" name="url" placeholder="Incolla link da jw.org o wol.jw.org" required>
+    <input type="text" name="title" placeholder="Titolo personalizzato (opzionale)">
+    <button type="submit">Aggiungi articolo</button>
+  </form>
+
+  {% if request.args.get('err') %}
+    {% set err = request.args.get('err') %}
+    <p class="error">
+      {% if err == 'host' %}
+        Solo link da <strong>jw.org</strong> o <strong>wol.jw.org</strong> sono ammessi.
+      {% else %}
+        Errore nel recupero dell'articolo: {{ err }}
+      {% endif %}
+    </p>
+  {% endif %}
+
+  {% if articles %}
+  <ul class="art-list">
+    {% for a in articles %}
+    <li class="art-item">
+      <a class="art-link" href="{{ url_for('view_article', aid=a.id) }}">
+        <span class="art-title">{{ a.title }}</span>
+        <span class="art-url">{{ a.url }}</span>
+      </a>
+      <form method="post" action="{{ url_for('delete_article', aid=a.id) }}"
+            onsubmit="return confirm('Eliminare questo articolo?');">
+        <button type="submit" class="danger">Elimina</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">Nessun articolo. Incolla un link qui sopra.</p>
+  {% endif %}
+</section>
+{% endblock %}

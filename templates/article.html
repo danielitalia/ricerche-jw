@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{{ article.title }} · Ricerche JW{% endblock %}
+{% block body_class %}{% if print_mode %}print-mode{% endif %}{% endblock %}
+{% block topbar_extra %}
+{% if not print_mode %}
+<nav class="crumbs">
+  <a href="{{ url_for('index') }}">Categorie</a> ›
+  <a href="{{ url_for('view_category', cid=article.category_id) }}">{{ article.category_name }}</a> ›
+  <span>Articolo</span>
+</nav>
+{% endif %}
+{% endblock %}
+{% block content %}
+
+{% if not print_mode %}
+<div class="article-toolbar no-print">
+  <button id="btn-highlight" type="button" title="Sottolinea il testo selezionato (S)">
+    <span class="swatch"></span> Sottolinea selezione
+  </button>
+  <button id="btn-unhighlight" type="button" title="Rimuovi sottolineatura dalla selezione (U)">
+    Rimuovi
+  </button>
+  <button id="btn-save" type="button">Salva</button>
+  <a class="btn-link" href="{{ url_for('print_article', aid=article.id) }}" target="_blank">
+    Salva come PDF
+  </a>
+  <a class="btn-link" href="{{ article.url }}" target="_blank" rel="noopener">
+    Apri originale ↗
+  </a>
+  <form method="post" action="{{ url_for('refresh_article', aid=article.id) }}"
+        onsubmit="return confirm('Ricaricare dall\'originale? Le sottolineature andranno perse.');"
+        style="display:inline">
+    <button type="submit" class="ghost">Ricarica originale</button>
+  </form>
+  <span id="save-status" class="save-status"></span>
+</div>
+{% endif %}
+
+<article class="article-wrap"
+         data-article-id="{{ article.id }}"
+         data-save-url="{{ url_for('save_article_html', aid=article.id) }}">
+  <header class="article-head">
+    <h1>{{ article.title }}</h1>
+    <p class="article-meta">
+      Categoria: <strong>{{ article.category_name }}</strong> ·
+      <a href="{{ article.url }}" target="_blank" rel="noopener">Fonte</a>
+    </p>
+  </header>
+  <div id="article-content" class="article-content">
+    {{ article.content_html | safe }}
+  </div>
+</article>
+
+{% if print_mode %}
+<script>window.addEventListener('load', () => setTimeout(() => window.print(), 300));</script>
+{% endif %}
+{% endblock %}

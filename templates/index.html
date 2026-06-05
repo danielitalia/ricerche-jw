@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Categorie · Ricerche JW{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Categorie</h1>
+  <form class="add-form" method="post" action="{{ url_for('create_category') }}">
+    <input type="text" name="name" placeholder="Nome categoria (es. Fede, Famiglia)" required>
+    <button type="submit">Aggiungi categoria</button>
+  </form>
+
+  {% if categories %}
+  <ul class="cat-list">
+    {% for c in categories %}
+    <li class="cat-item">
+      <a class="cat-link" href="{{ url_for('view_category', cid=c.id) }}">
+        <span class="cat-name">{{ c.name }}</span>
+        <span class="cat-count">{{ c.n }} articolo{{ '' if c.n == 1 else 'i' }}</span>
+      </a>
+      <form method="post" action="{{ url_for('delete_category', cid=c.id) }}"
+            onsubmit="return confirm('Eliminare la categoria “{{ c.name }}” e tutti i suoi articoli?');">
+        <button type="submit" class="danger">Elimina</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">Nessuna categoria. Creane una qui sopra per iniziare.</p>
+  {% endif %}
+</section>
+{% endblock %}
