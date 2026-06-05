@@ -2,8 +2,21 @@
 <html lang="it">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{% block title %}Ricerche JW{% endblock %}</title>
+
+<!-- PWA -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#2b6cb0">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="application-name" content="Ricerche JW">
+<!-- iOS -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Ricerche JW">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+<link rel="icon" type="image/png" href="{{ url_for('static', filename='icons/favicon-64.png') }}">
+
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body class="{% block body_class %}{% endblock %}">
@@ -15,6 +28,33 @@
 {% block content %}{% endblock %}
 </main>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("/sw.js").catch(function () {});
+    });
+  }
+  // Pulsante "Installa app" (Android / Chrome desktop)
+  (function () {
+    var deferred = null;
+    window.addEventListener("beforeinstallprompt", function (e) {
+      e.preventDefault();
+      deferred = e;
+      var btn = document.createElement("button");
+      btn.textContent = "Installa app";
+      btn.className = "install-btn";
+      btn.addEventListener("click", function () {
+        btn.remove();
+        if (deferred) { deferred.prompt(); deferred = null; }
+      });
+      document.body.appendChild(btn);
+    });
+    window.addEventListener("appinstalled", function () {
+      var b = document.querySelector(".install-btn");
+      if (b) b.remove();
+    });
+  })();
+</script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -8,7 +8,16 @@ import requests
 from bs4 import BeautifulSoup
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
-from flask import Flask, jsonify, redirect, render_template, request, url_for
+from flask import (
+    Flask,
+    jsonify,
+    make_response,
+    redirect,
+    render_template,
+    request,
+    send_from_directory,
+    url_for,
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ALLOWED_HOSTS = {"jw.org", "www.jw.org", "wol.jw.org"}
@@ -145,6 +154,25 @@ def get_article(aid):
 # ----------------------------------------------------------------------------
 # Rotte
 # ----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# PWA: service worker (servito dalla radice per avere scope "/") e manifest
+# ----------------------------------------------------------------------------
+@app.route("/sw.js")
+def service_worker():
+    resp = make_response(send_from_directory(app.static_folder, "sw.js"))
+    resp.headers["Content-Type"] = "application/javascript"
+    resp.headers["Service-Worker-Allowed"] = "/"
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+@app.route("/manifest.webmanifest")
+def manifest():
+    resp = make_response(send_from_directory(app.static_folder, "manifest.webmanifest"))
+    resp.headers["Content-Type"] = "application/manifest+json"
+    return resp
+
+
 @app.route("/")
 def index():
     counts = {}
